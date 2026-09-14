@@ -3,6 +3,7 @@ import csv
 import json
 import time
 import shutil
+import zipfile
 from urllib.parse import urlparse, parse_qs, unquote
 
 import requests
@@ -168,7 +169,7 @@ def download_m4b_files(
             filename,
         )
 
-        print(f"[{index}/{len(m4b_links)}] " f"Downloading {title}...")
+        print(f"[{index}/{len(m4b_links)}] Downloading {title}...")
 
         response = session.get(
             url,
@@ -184,6 +185,88 @@ def download_m4b_files(
                     f.write(chunk)
 
         print(f"Saved: {output_path}")
+
+
+def download_mp3_files(
+    driver: WebDriver,
+    download_links: list[dict],
+    output_directory_name: str,
+):
+    session = create_requests_session(driver)
+
+    mp3_links = [
+        download_link
+        for download_link in download_links
+        if "m4b" not in download_link.get("download_name", "").lower()
+    ]
+
+    print(f"Found {len(mp3_links)} MP3 zip files to download.")
+
+    for index, download_link in enumerate(mp3_links, start=1):
+        title = download_link.get("title")
+        author = download_link.get("author")
+        url = download_link.get("url")
+
+        output_directory = os.path.join(
+            output_directory_name,
+            author,
+            title,
+        )
+
+        filename = get_filename_from_url(url)
+
+        if not filename.lower().endswith(".zip"):
+            filename += ".zip"
+
+        zip_path = os.path.join(
+            output_directory,
+            filename,
+        )
+
+        print(f"[{index}/{len(mp3_links)}] " f"Downloading {title} ({filename})...")
+
+        response = session.get(
+            url,
+            stream=True,
+            timeout=120,
+        )
+
+        response.raise_for_status()
+
+        with open(zip_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+        print(f"Downloaded: {zip_path}")
+        print(f"Extracting {filename}...")
+
+        with zipfile.ZipFile(zip_path, "r") as zip_file:
+            for zip_info in zip_file.infolist():
+                if zip_info.is_dir():
+                    continue
+
+                original_filename = os.path.basename(zip_info.filename)
+
+                prefix = f"{title} - "
+
+                if original_filename.startswith(prefix):
+                    new_filename = original_filename[len(prefix) :]
+                else:
+                    new_filename = original_filename
+
+                output_path = os.path.join(
+                    output_directory,
+                    new_filename,
+                )
+
+                with zip_file.open(zip_info) as source:
+                    with open(output_path, "wb") as destination:
+                        shutil.copyfileobj(source, destination)
+
+        os.remove(zip_path)
+
+        print(f"Extracted and cleaned up: {title}")
 
 
 def main() -> None:
@@ -225,7 +308,11 @@ def main() -> None:
         print("Attempting full library download...")
 
         if download_type == "mp3":
-            ...
+            download_mp3_files(
+                driver,
+                download_links,
+                output_directory_name,
+            )
 
         if download_type == "m4b":
             download_m4b_files(
