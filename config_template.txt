@@ -1,0 +1,6 @@
+Your login config should be named `config.txt`, be in the current working directory, and look like this:
+
+email=...
+password=...
+
+where `...` are replaced with the corresponding credentials
