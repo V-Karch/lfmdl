@@ -2,6 +2,10 @@ import os
 import csv
 import json
 import time
+import shutil
+from urllib.parse import urlparse, parse_qs, unquote
+
+import requests
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -59,6 +63,7 @@ def scan_page_for_links(driver: WebDriver) -> list[dict]:
 
 
 def collect_all_download_links(driver: WebDriver) -> list[dict]:
+    driver.implicitly_wait(10)
     driver.get("https://libro.fm/user/library")
 
     all_downloads: list[dict] = []
@@ -73,6 +78,7 @@ def collect_all_download_links(driver: WebDriver) -> list[dict]:
         all_downloads.extend(page_downloads)
 
         next_links = driver.find_elements(By.CSS_SELECTOR, 'a[aria-label="Next page"]')
+
         if not next_links:
             break
 
@@ -83,30 +89,106 @@ def collect_all_download_links(driver: WebDriver) -> list[dict]:
 
         page += 1
 
+    driver.implicitly_wait(120)
+
     return all_downloads
 
 
-def setup_output_directory(
-    output_directory_name: str, download_links: list[dict]
-) -> set[tuple[str, str]]:
+def setup_output_directory(output_directory_name: str, download_links: list[dict]):
     os.mkdir(output_directory_name)
 
     print("Making author directories...")
 
-    author_book_pairs: set[tuple[str, str]] = set()
     for download_link in download_links:
-        author_book_pairs.add((download_link.get("author"), download_link.get("title")))
-
-    for pair in author_book_pairs:
-        os.makedirs(os.path.join(output_directory_name, pair[0], pair[1]))
+        os.makedirs(
+            os.path.join(
+                output_directory_name,
+                download_link.get("author"),
+                download_link.get("title"),
+            ),
+            exist_ok=True,
+        )
 
     print("Output directory set up!")
 
-    return author_book_pairs
+
+def create_requests_session(driver: WebDriver) -> requests.Session:
+    session = requests.Session()
+
+    for cookie in driver.get_cookies():
+        session.cookies.set(
+            cookie["name"],
+            cookie["value"],
+            domain=cookie.get("domain"),
+            path=cookie.get("path", "/"),
+        )
+
+    return session
+
+
+def get_filename_from_url(url: str) -> str:
+    parsed_url = urlparse(url)
+    query = parse_qs(parsed_url.query)
+
+    filename = query.get("file", ["download.m4b"])[0]
+
+    return unquote(filename)
+
+
+def download_m4b_files(
+    driver: WebDriver,
+    download_links: list[dict],
+    output_directory_name: str,
+):
+    session = create_requests_session(driver)
+
+    m4b_links = [
+        download_link
+        for download_link in download_links
+        if "m4b" in download_link.get("download_name", "").lower()
+    ]
+
+    print(f"Found {len(m4b_links)} m4b files to download.")
+
+    for index, download_link in enumerate(m4b_links, start=1):
+        title = download_link.get("title")
+        author = download_link.get("author")
+        url = download_link.get("url")
+
+        filename = get_filename_from_url(url)
+
+        output_directory = os.path.join(
+            output_directory_name,
+            author,
+            title,
+        )
+
+        output_path = os.path.join(
+            output_directory,
+            filename,
+        )
+
+        print(f"[{index}/{len(m4b_links)}] " f"Downloading {title}...")
+
+        response = session.get(
+            url,
+            stream=True,
+            timeout=120,
+        )
+
+        response.raise_for_status()
+
+        with open(output_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+        print(f"Saved: {output_path}")
 
 
 def main() -> None:
     print("Attempting login/setup...")
+
     # Setup / Login
     options = Options()
 
@@ -120,7 +202,7 @@ def main() -> None:
     options.set_preference("pdfjs.disabled", True)
 
     driver = webdriver.Firefox(options=options)
-    driver.implicitly_wait(10)
+    driver.implicitly_wait(120)
 
     try:
         login_sequence(driver)
@@ -129,18 +211,28 @@ def main() -> None:
         print("Collecting all download links...")
         download_links = collect_all_download_links(driver)
 
-        print(download_links[0])
-        print(download_links[1])
-        print(download_links[2])
-
         download_type = input("Which format would you like to download? (mp3/m4b)\n$ ")
 
         print("Setting up output directory...")
 
         output_directory_name = f"library_backup_{int(time.time())}"
-        author_book_pairs = setup_output_directory(
-            output_directory_name, download_links
+
+        setup_output_directory(
+            output_directory_name,
+            download_links,
         )
+
+        print("Attempting full library download...")
+
+        if download_type == "mp3":
+            ...
+
+        if download_type == "m4b":
+            download_m4b_files(
+                driver,
+                download_links,
+                output_directory_name,
+            )
 
     finally:
         driver.quit()
