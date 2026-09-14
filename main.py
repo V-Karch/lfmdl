@@ -283,6 +283,7 @@ def main() -> None:
     )
     options.set_preference("browser.download.manager.showWhenStarting", False)
     options.set_preference("pdfjs.disabled", True)
+    options.add_argument("--headless")
 
     driver = webdriver.Firefox(options=options)
     driver.implicitly_wait(120)
