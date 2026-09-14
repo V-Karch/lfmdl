@@ -86,6 +86,25 @@ def collect_all_download_links(driver: WebDriver) -> list[dict]:
     return all_downloads
 
 
+def setup_output_directory(
+    output_directory_name: str, download_links: list[dict]
+) -> set[tuple[str, str]]:
+    os.mkdir(output_directory_name)
+
+    print("Making author directories...")
+
+    author_book_pairs: set[tuple[str, str]] = set()
+    for download_link in download_links:
+        author_book_pairs.add((download_link.get("author"), download_link.get("title")))
+
+    for pair in author_book_pairs:
+        os.makedirs(os.path.join(output_directory_name, pair[0], pair[1]))
+
+    print("Output directory set up!")
+
+    return author_book_pairs
+
+
 def main() -> None:
     print("Attempting login/setup...")
     # Setup / Login
@@ -113,8 +132,15 @@ def main() -> None:
         print(download_links[0])
         print(download_links[1])
         print(download_links[2])
+
         download_type = input("Which format would you like to download? (mp3/m4b)\n$ ")
-        ...
+
+        print("Setting up output directory...")
+
+        output_directory_name = f"library_backup_{int(time.time())}"
+        author_book_pairs = setup_output_directory(
+            output_directory_name, download_links
+        )
 
     finally:
         driver.quit()
